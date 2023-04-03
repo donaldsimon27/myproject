@@ -1,5 +1,5 @@
 #Load packages-------------
-library(tidymodels)
+library(tidymodels)  
 tidymodels::tidymodels_prefer()
 options(tidymodels.dark = TRUE)
 # Helper packages
@@ -48,27 +48,30 @@ baseline0 <- baselineX %>%
 
 data <-  baseline0 |>                #blx = baselineX
   select(-bodymass)      #remove bodymass since we already BMI in the dataset
-vars_to_factor <- c("CAVNUM_wk0")
-data[vars_to_factor] <- lapply(data[vars_to_factor], function(x) as.factor(x))
-rm(vars_to_factor)
+
+#vars_to_factor <- c("CAVNUM_wk0")
+#data[vars_to_factor] <- lapply(data[vars_to_factor], function(x) as.factor(x))
+#rm(vars_to_factor)
 
 data$Outcome <- data$Outcome |> relevel(ref='PoorOutcome')
 
-
+#data <- data |> select(-c(1, 3:6, 70:84))      #removes Cavnum and symptoms
 
 #Step3: Baseline recipe--------- 
 normalized_recipe <- 
-  recipe(Outcome ~ ., 
-         data = data) %>% 
+  recipe(Outcome ~ ., data = data) |> 
   update_role(PID, new_role = "ID") |> 
-  step_normalize(all_numeric_predictors()) %>% #Centering and scaling for all_numeric_predictors
+  step_zv(all_predictors()) |> 
+  step_orderNorm(all_numeric_predictors()) |> 
+  step_normalize(all_numeric_predictors()) |>  #newly_added_03Mar2023
   step_dummy(all_nominal_predictors()) |> 
   themis::step_downsample(Outcome)
 
+#update_role(PID, new_role = "ID") |> 
 #step_corr(all_predictors(), threshold = 0.9, method = "spearman")  #Can add as an additional step to recip
 
 predictor_count <- sum(normalized_recipe$term_info$role == 'predictor')       #82 predictors
-
+predictor_count
 
 #Step4: Different Models--------------
 C5.0_mod <-
@@ -91,7 +94,7 @@ Elastic_net_mod <-
 
 #Step5: CREATING THE WORKFLOW SET-----------
 normalized_workflow <-
-  workflow_set(
+  workflowsets::workflow_set(
     preproc = list(normalised = normalized_recipe),
     models = list(C5.0 = C5.0_mod,
                   KNN = KNN_mod,
@@ -106,12 +109,11 @@ normalized_workflow <- normalized_workflow |>
 #Split in training and and test set ??? D/W 
 #??LOOCV
 
-
-set.seed(15440)
+set.seed(14193)
 folds <- nested_cv(data,
-                   outside = vfold_cv(repeats = 1, strata = Outcome),   #Fitting on this
-                   inside = bootstraps(times = 25, strata = Outcome))   #Tuning happens on this 
-
+                   outside = vfold_cv(v = 10, repeats = 1, strata = "Outcome"),   #Fitting on this
+                   inside = bootstraps(times = 50, strata = "Outcome"))
+# inside = vfold_cv(v=5, repeats = 1, strata = TB))
 
 
 #Step5: Model parameters and workflows------------
@@ -132,13 +134,18 @@ workflows <- normalized_workflow |>
 
 
 #Step7: Tuning-------------
-bayes_ctrl <- control_bayes(no_improve = 15L, save_pred = TRUE, parallel_over = "everything", save_workflow = TRUE, allow_par=TRUE)
+bayes_ctrl <- control_bayes(no_improve = 15L, 
+                            save_pred = TRUE, 
+                            parallel_over = "resamples",    #"everything" -  success when parallel =  "resamples" instead of parallel =  "everything" is used 
+                            save_workflow = TRUE, 
+                            allow_par = TRUE, 
+                            verbose = TRUE)
 
 
 #tune_results <- foreach(i=1:length(folds$splits)) %dorng% {
 tune_results <- foreach(i=1:length(folds$splits)) %do% {
   library(rules)
-  workflows %>% workflow_map(seed = 14193,
+  workflows %>% workflow_map(seed = 15440,
                              fn = "tune_bayes",
                              resamples = folds$inner_resamples[[i]],
                              metrics = metric_set(roc_auc),
@@ -146,7 +153,6 @@ tune_results <- foreach(i=1:length(folds$splits)) %do% {
                              iter = 50,
                              control = bayes_ctrl)
 }
-
 
 
 saveRDS(tune_results, "~/Desktop/R.Projects/PredictLuminex/Data/Exported Data/tune_results.rds")
