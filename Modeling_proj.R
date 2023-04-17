@@ -53,22 +53,67 @@ data <-  baseline0 |>                #blx = baselineX
 #data[vars_to_factor] <- lapply(data[vars_to_factor], function(x) as.factor(x))
 #rm(vars_to_factor)
 
+
 data$Outcome <- data$Outcome |> relevel(ref='PoorOutcome')
 
-#data <- data |> select(-c(1, 3:6, 70:84))      #removes Cavnum and symptoms
-
 #Step3: Baseline recipe--------- 
-normalized_recipe <- 
-  recipe(Outcome ~ ., data = data) |> 
-  update_role(PID, new_role = "ID") |> 
-  step_zv(all_predictors()) |> 
-  step_orderNorm(all_numeric_predictors()) |> 
-  step_normalize(all_numeric_predictors()) |>  #newly_added_03Mar2023
+#data <- data |> select(-PID)    #remove PID before normalization
+
+numeric_transformation <- recipe(Outcome ~ ., data = data) |>        #recipe required for transformation
+  step_best_normalize (all_numeric_predictors()) |> 
+  recipes::prep(training = as.data.frame(data)) |> 
+  bake(as.data.frame(data))
+
+#transformation_recipe <- recipe(Outcome ~ ., data = data) 
+#bn_transpred <- step_best_normalize(transformation_recipe, all_numeric()) 
+#bn_estimates <- recipes::prep(bn_transpred, training = as.data.frame(data))
+#bn_data <- bake(bn_estimates, as.data.frame(data))
+data <- numeric_transformation |> 
+  select(-PID) |> 
+  select(Outcome, everything())
+plot(density(data$C3), main = "before")
+plot(density(bn_data$C3), main = "after")
+plot(density(transformation_recipe$C3), main = "after")
+
+
+##Step_corr-------
+rec <- recipe(Outcome ~ ., data = data)
+corr_filter <- rec |> 
+  step_corr(all_numeric_predictors(), threshold = 0.6) |> 
+  prep(training = data) |> 
+  bake(new_data = data)
+
+numeric_transformation <- recipe(Outcome ~ ., data = corr_filter) |>        #recipe required for transformation
+  step_best_normalize (all_numeric_predictors()) |> 
+  recipes::prep(training = as.data.frame(corr_filter)) |> 
+  bake(as.data.frame(corr_filter))
+
+data <- numeric_transformation |> 
+  select(-c(1, 34:55)) |> 
+  cbind(corr_filter$PID) |> 
+  rename(PID = "corr_filter$PID") |> 
+  select(PID, Outcome, everything())
+
+normalized_recipe <-  recipe(Outcome ~ ., data = data) |>    #add additional recipe steps after transformation
+  update_role(PID, new_role = "ID") |>
+  step_zv(all_numeric_predictors()) |> 
   step_dummy(all_nominal_predictors()) |> 
+  step_normalize(all_numeric_predictors()) |>  
   themis::step_downsample(Outcome)
 
+data <- bn_data
+normalized_recipe <-  recipe(Outcome ~ ., data = data) |>    #add additional recipe steps after transformation
+  step_zv(all_numeric_predictors()) |> 
+  step_dummy(all_nominal_predictors()) |> 
+  step_normalize(all_numeric_predictors()) |>  
+  step_corr(all_predictors(), threshold = 0.6, method = "spearman") |>  #Can add as an additional step to recipe
+  themis::step_downsample(Outcome) 
+#step_pca(all_numeric_predictors())  
+
+#step_orderNorm(all_numeric_predictors()) |> 
 #update_role(PID, new_role = "ID") |> 
-#step_corr(all_predictors(), threshold = 0.9, method = "spearman")  #Can add as an additional step to recip
+#
+
 
 predictor_count <- sum(normalized_recipe$term_info$role == 'predictor')       #82 predictors
 predictor_count
@@ -136,7 +181,7 @@ workflows <- normalized_workflow |>
 #Step7: Tuning-------------
 bayes_ctrl <- control_bayes(no_improve = 15L, 
                             save_pred = TRUE, 
-                            parallel_over = "resamples",    #"everything" -  success when parallel =  "resamples" instead of parallel =  "everything" is used 
+                            parallel_over = "everything",    # replaced "everything" with "resamples" -  success when parallel =  "resamples" instead of parallel =  "everything" is used 
                             save_workflow = TRUE, 
                             allow_par = TRUE, 
                             verbose = TRUE)
@@ -160,15 +205,24 @@ saveRDS(tune_results, "~/Desktop/R.Projects/PredictLuminex/Data/Exported Data/tu
 
 #Step8: Tune results object----------
 tune_results <- readRDS("~/Desktop/R.Projects/PredictLuminex/Data/Exported Data/tune_results.rds")
+ 
 
 
-#Step9: Normalized recipe----------
+#Step9: Updated Normalized recipe----------
 normalised_training_recipe <- 
   recipe(Outcome ~ ., 
          data = data) |>
   update_role(PID, new_role = "ID") |>
+  step_zv(all_predictors()) |>
   step_normalize(all_numeric_predictors()) |>
   step_dummy(all_nominal_predictors()) |> 
+  step_corr(all_predictors(), threshold = 0.9, method = "spearman") |>
+  step_smote(Outcome) 
+
+normalised_training_recipe <-  recipe(Outcome ~ ., data = data) |>    #add additional recipe steps after transformation
+  step_zv(all_numeric_predictors()) |> 
+  step_dummy(all_nominal_predictors()) |> 
+  step_normalize(all_numeric_predictors()) |> 
   step_smote(Outcome) 
 
 #step_corr(all_predictors(), threshold = 0.9, method = "spearman")  #Can add as an additional step to recipe
@@ -278,3 +332,16 @@ for (i in 1:4) {
   plot(roc_curves[[i]], main=workflows$wflow_id[i], print.auc=T)
 }
 par(mfrow=c(1,1))       #if you want individual plots
+
+
+#?NB variables in the final model-----------
+C.50_fit <- tune_results[[4]]$result[[4]] |> 
+   extract_workflow(tune_results[[4]]$wflow_id[[4]]) |> 
+   finalize_workflow(show_best(tune_results[[4]]$result[[4]],n=1)) |> 
+   fit(data=analysis(folds$splits[[1]]))  #?[[i]]
+
+
+C.50_fit |> extract_fit_parsnip() |> 
+  vip(n = 30)
+C.50_fit
+
