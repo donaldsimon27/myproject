@@ -293,12 +293,13 @@ data3 <- data2 |>
   rename("sIL_6R" = "sIL-6R") |> 
   rename("MMP_9" = "MMP-9") |> 
   rename("MMP_2" = "MMP-2")
-write.csv(data3, "~/Desktop/R.Projects/PredictDataProcessing/Data/datalongf.csv")
+write.csv(data3, "~/Desktop/R.Projects/PredictDataProcessing/Data/datawide.csv")
 
 #Pivot longer---
 data4 <- data3 |> 
   select(description, PID, Timepoint, Outcome, everything()) |> 
   pivot_longer(cols = 5:54, names_to = "analyte", values_to = "obs_conc")
+write.csv(data4, "~/Desktop/R.Projects/PredictDataProcessing/Data/datalongf.csv")
 
 #Confirm that I can go from wider to longer easily---------
 data5 <- data4 |> 
@@ -313,13 +314,13 @@ data_final <- type.convert(data3, as.is = FALSE) %>%   #CONVERT CHARACTER VECTOR
   data.matrix() %>%                                    #mandatory transformation to a matrix for misForest
   missForest(verbose = TRUE)
 
-data_final  |> data_final |> as_tibble()
 
 dem <- data3 |> 
   select(1:3, 54)
 
 data_final1 <- dem |> 
   cbind(data_final$ximp) |> 
-  select(-(5:7), -58)
+  select(-(5:7), -58) |> 
+  as_tibble()
 write.csv(data_final1, "~/Desktop/R.Projects/PredictDataProcessing/Data/datawideImp.csv")
 
