@@ -1,38 +1,22 @@
 #Load packages----------
 library(tidyverse)
-library(stringr)
-
-
-#Initial Import dataset---------
-#Imported using Jesse's pipeline
-predlum0 <- readRDS("~/Documents/projectDS/rds/6_dta_symbol_remove.rds")
-write.csv(predlum0, file = "~/Desktop/R.Projects/PredictLuminex/Data/Exported Data/predlum.csv")
-
-
-#Set working directory for session with Jess---------
-setwd("~/Desktop/R.Projects/PredictLuminex/Scripts")
-
-
-#Exported Dataset---------
-#Going forward, work with this dataset
-predlum <- read.csv("~/Desktop/R.Projects/PredictLuminex/Data/Exported Data/predlum.csv")
-dim(predlum)
-
-
-#Impute OOR values-------------
-
-library(tidyverse)
 library(magrittr)
 library(utils)
 
-#Ncite's Impuatation script to impute OOR low and high values----------
-#Assuming that your data set was exported with all the columns and consist of the "obs_conc" variable.
-#Create "rds" and "csv" folders for the output data.
 
-#Run the R functions in this script and then include your data set name
-#e.g., Run this R script. Then Run "remove_symbols(dataset_project)" in the console.
+#Set working directory---------
+setwd("~/Desktop/R.Projects/PredictDataProcessing/Data")
 
-#Step 1:
+
+#Step 1: Import dataset--------
+#Textfiles read using Jesse's pipeline
+predlum <- readRDS("~/Desktop/R.Projects/PredictDataProcessing/Data/6_dta_symbol_remove.rds")
+dim(predlum)
+
+
+#Step 2.1Initial imputation-------------------------
+#Ncite's Imputation script to impute OOR low and high values
+
 #Use the "remove_symbols" function to classify missing data, add metadata variables to the data set and remove symbols.
 
 remove_symbols <- function(dataName = "dataset_project"){
@@ -73,18 +57,18 @@ remove_symbols <- function(dataName = "dataset_project"){
         )
       )
     )
-  # Save in RDS object.
-  saveRDS(dataName, "~/Desktop/R.Projects/PredictLuminex/Data/rdsfold/predlum.rds")
+  
 }
+#Save in RDS object.
+#saveRDS(dataName, "~/Desktop/R.Projects/PredictLuminex/Data/rdsfold/predlum.rds")
+predlum <- remove_symbols(dataName = predlum)
 
-remove_symbols(dataName = predlum)
-predlums1 <- readRDS("~/Desktop/R.Projects/PredictLuminex/Data/rdsfold/predlum.rds")
 
-#Step 2:
+#Step 2.2: Imputation-----------
 #Impute the OOR values, oor below (<) and oor above (>) values.
 #Assuming the following variables and variable names are in your data set, e.g.,
 #"analyte" containing the analyte names.
-#"obs_conc_numerics" created in the previouse step.
+#"obs_conc_numerics" created in the previous step.
 
 impute <- function(dataName = "dataset_project") {
   #' @importFrom dplyr arrange count group_by summarise
@@ -117,25 +101,17 @@ impute <- function(dataName = "dataset_project") {
     select(-Min,-Max)
   # Round Obs.Conc.Impute to two decimal places.
   imp$obs_conc_impute <- round(imp$obs_conc_impute, 2)
-  # Save data to disk in RDS format.
-  saveRDS(imp, "~/Desktop/R.Projects/PredictLuminex/Data/rdsfold/predstep2.rds")
-  # Save data to disk in CSV format.
-  write.csv(imp, file = "~/Desktop/R.Projects/PredictLuminex/Data/rdsfold/predlum.csv")
+  saveRDS(imp, "~/Desktop/R.Projects/PredictDataProcessing/Data/predlum.rds")
+  write.csv(imp, file = "~/Desktop/R.Projects/PredictDataProcessing/Data/predlum.csv")
 }
-
-impute(predlums1)
-final_imputed <- read_csv("~/Desktop/R.Projects/PredictLuminex/Data/rdsfold/predlum.csv", 
-                          col_names = TRUE)
-write_rds(final_imputed, "~/Desktop/R.Projects/PredictLuminex/Data/rdsfold/final_imputed.rds")
+impute(dataName = predlum)
 
 
-#STEP 1------------
-#Concatenated data points to be removed------------
-predlum10 <- final_imputed %>% 
+#Step 3: Select Observations only----------
+#remove standards
+predlum <- read.csv("~/Desktop/R.Projects/PredictDataProcessing/Data/predlum.csv") %>% 
   filter(grepl(pattern = "X", type)) %>% 
-  select(c("description", "analyte", "obs_conc_impute")) %>% 
-  distinct() %>% 
-  tidyr::pivot_wider(names_from = analyte, values_from = obs_conc_impute) %>% 
+  select(c("description", "analyte_simple", "obs_conc_impute")) |> 
   filter(description  != "ST01064373" & 
            description != "ST01061789" & 
            description  != "ST01061782"  & 
@@ -143,184 +119,85 @@ predlum10 <- final_imputed %>%
            description  != "ST01046593") 
 
 
-#STEP 2" Create a vector with the PDs and TPs to be removed-------------
-a1 <- c("13031-W04", "13031-W08", "13031-W16", "13031-W24")
-
-#STEP 3: Remove 13031 for correction-----------------
-predlum_13031 <- predlum10 %>% 
-  filter((description %in% a1)) %>% 
-  view()
-
-
-#STEP 4: Remove 13031 from the dataset---------------
-predlum11 <- 
-  predlum10 %>% 
-  filter(!(description %in% a1))              #349 observations 
-
-#Step 5.1:Mutate "15026 REC" to "15026-W24" as per luminex technician-------- 
-predlum11 <- predlum11 %>% 
-  mutate(description = ifelse(description == "15026 REC", "15026-W24", description)) 
-
-#STEP 5.2: Create a vector for the observations that were mislabeled------
+#STEP 4: Create a vector with the PDs and TPs to be removed-------------
+double_entry <- c("13031-W04", "13031-W08", "13031-W16", "13031-W24")
 mislabeled <- c("130016-W24_7084169", "13009-W24", "13010-W08", "13010-W24", "13085-Dx", "13085-W04", 
                 "13085-W08" , "13085-W16", "13085-W24", "13107-W16", "13108-W08")
 
-#Step 6: Remove "mislabeled from the dataset --------------
-predlum12 <- predlum11 %>% 
-  filter(!(description %in% mislabeled))
 
-#Step7: Sort out description, ie. remove detail that follow week no---------
-predlum13 <- predlum12 %>% 
-  mutate(description = gsub('_.*', '', description))
-
-#Step 8: Replace NULL characters in the dataset by coding them as NA-------
-#It is likely that there was not enough specimen left to run these kits 
-
-predlum14 <- predlum13 %>% 
+#Step 5: Remove disputed observations--------------
+predlum <- 
+  predlum %>% 
+  filter(!(description %in% double_entry )) |>      #remove concatenated double data points
+  filter(!(description %in% mislabeled)) |>         #remove "mislabeled samples from the dataset
+  mutate(description = ifelse(description == "15026 REC", "15026-W24", description)) |>  #Correct "15026 REC" to "15026-W24" as per luminex technician
+  mutate(description = gsub('_.*', '', description)) |> 
   as.data.frame() %>% 
-  replace(.=="NULL", NA)
+  replace(.=="NULL", NA)  |>   #Replace NULL characters in the dataset by coding them as NA; not enough sample volume for experiment
+  rename("analyte" = "analyte_simple")
 
 
-
-#Step9: Write csv------------
-write_rds(predlum14, file = "~/Desktop/R.Projects/PredictLuminex/Data/Exported Data/predMain.rds")
-
-#Explore the data----------
-getwd()
-predMain <- readRDS("~/Desktop/R.Projects/PredictLuminex/Data/Exported Data/predMain.rds")
-predMain <- predMain %>% mutate_at(2:51, as.numeric)
-
-str(predMain)
-class(predMain)
-names(predMain)
-head(predMain)
-tail(predMain)
-glimpse(predMain)
-skimr::skim(predMain)
-summary(predMain)
+predlum <- predlum |>                                       
+  unique() |> 
+  pivot_wider(names_from = "analyte", values_from = "obs_conc_impute") 
+ 
+predlum <- predlum |> 
+  mutate(description1 = description) |> 
+  select(description , description1, everything()) |> 
+  separate(description1, into = c("PID", "Timepoint")) |> 
+  arrange(PID)
 
 
-#Add outcome to dataset-------
-data0 <- predMain |> 
-  mutate(PID = description) |> 
-  select(PID, description, everything()) |>
-  separate(PID, c("PID", "Timepoint")) |>
-  arrange(description)
-
-data1 <- data0 |> 
-  mutate(Outcome = PID) 
-
-data2 <- data1 |> 
-  mutate(Outcome = ifelse(Outcome == "11012", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11014", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11024", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11031", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11039", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11040", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11047", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11056", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11058", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11064", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11067", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11078", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "11085", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12006", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12020", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12024", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12025", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12029", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12042", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12043", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12045", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12052", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12054", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12064", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12065", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12067", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12070", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12074", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "12083", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13001", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13009", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13010", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13017", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13026", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13029", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13031", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13033", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13037", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13041", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13051", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13056", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13071", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13083", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13085", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13107", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "13108", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14010", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14025", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14026", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14029", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14031", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14046", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14051", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14053", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14057", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14069", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14091", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14099", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14110", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14112", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "14124", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15013", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15017", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15018", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15022", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15026", "PoorOutcome", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15043", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15063", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15074", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15086", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15091", "Cured", Outcome)) %>% 
-  mutate(Outcome = ifelse(Outcome == "15092", "Cured", Outcome)) 
+#Step 6: Outcome from PETCT spreadsheet provided by Shawn (PredictTB)-----------
+Outcome_PID <- readxl::read_xlsx("~/Desktop/R.Projects/PredictDataProcessing/Data/Predict_luminex_Outcome_clinical_petct.xlsx") |> 
+  rename(
+    PID = SUBJID,
+    HCT = LBORRES_HCT, 
+    WBC = LBORRES_WBC, 
+    HBA1C = LBORRES_HBA1C, 
+    AST = LBORRES_AST, 
+    HGB = LBORRES_HGB, 
+    PLT = LBORRES_PLT, 
+    CREAT = LBORRES_CREAT, 
+    ALT = LBORRES_ALT, 
+    bodymass = Weight, 
+    Outcome = Cure_ConfRelapTF) |> 
+  select(PID, Outcome) |> 
+  mutate(Outcome = ifelse(Outcome == "ConfRelapTF", "PoorOutcome", Outcome)) |> 
+  filter(PID != 13085)
+ 
 
 
-#Analyte name convention, replace hyphens with underscore----------
-data3 <- data2 |> 
-  rename("IL_22" = "IL-22") |> 
-  rename("IL_9" = "IL-9") |> 
-  rename("sIL_4R" = "sIL-4R") |> 
-  rename("sIL_6R" = "sIL-6R") |> 
-  rename("MMP_9" = "MMP-9") |> 
-  rename("MMP_2" = "MMP-2")
-write.csv(data3, "~/Desktop/R.Projects/PredictDataProcessing/Data/datawide.csv")
+#Step 6: Link observations to clinical outcome -----------
+predlum <- predlum |> 
+  mutate_at("PID", as.numeric) |> 
+  left_join(Outcome_PID, by = "PID") 
 
-#Pivot longer---
-data4 <- data3 |> 
-  select(description, PID, Timepoint, Outcome, everything()) |> 
-  pivot_longer(cols = 5:54, names_to = "analyte", values_to = "obs_conc")
-write.csv(data4, "~/Desktop/R.Projects/PredictDataProcessing/Data/datalongf.csv")
-
-#Confirm that I can go from wider to longer easily---------
-data5 <- data4 |> 
-  pivot_wider(names_from = "analyte", values_from = "obs_conc")
-write.csv(data5, "~/Desktop/R.Projects/PredictDataProcessing/Data/datawide.csv")
+predlum <- predlum |> 
+  select(1:3, 54, everything())
 
 
-#MissForest Imputation for NA's--------
+#Step 7: Baseline dataset MissForest Imputation for NA's--------
 #The imputation is done on the dataset in the wide format
 library(missForest)
-data_final <- type.convert(data3, as.is = FALSE) %>%   #CONVERT CHARACTER VECTORS TO FACTORS, MISSForest rejects character vectors
+set.seed(15440)
+baseline_analytes <- predlum |> 
+  filter(Timepoint == "Dx") |> 
+  select(-c(1, 3))
+
+baseline_outcome <- baseline_analytes |> 
+  select(1, 2)
+
+baseline_misF <- type.convert(baseline_analytes, as.is = FALSE) %>%   #CONVERT CHARACTER VECTORS TO FACTORS, MISSForest rejects character vectors
   data.matrix() %>%                                    #mandatory transformation to a matrix for misForest
   missForest(verbose = TRUE)
 
+data <- baseline_misF$ximp |> as_tibble() |> 
+  left_join(baseline_outcome, by = "PID")
 
-dem <- data3 |> 
-  select(1:3, 54)
-
-data_final1 <- dem |> 
-  cbind(data_final$ximp) |> 
-  select(-(5:7), -58) |> 
-  as_tibble()
-write.csv(data_final1, "~/Desktop/R.Projects/PredictDataProcessing/Data/datawideImp.csv")
+data <- data |> 
+  select(1, 2, 53, everything()) |> 
+  select(-Outcome.x) |> 
+  rename(Outcome  = "Outcome.y") |> 
+  select(PID, Outcome, everything())
 
